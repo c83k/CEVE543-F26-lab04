@@ -13,3 +13,6 @@ _freeze/
 
 # OS noise
 .DS_Store
+
+# Downloaded NOAA data; the notebook re-downloads it on a fresh clone.
+*-hourly.csv

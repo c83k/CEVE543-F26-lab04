@@ -26,8 +26,8 @@ execute:
 
 In this lab, you will fit a generalized extreme value (GEV) distribution to annual maximum water levels at a tide gauge by maximum likelihood, by L-moments, and by Bayesian inference, then compare the estimates.
 
-The code below runs end to end on Sewells Point, Virginia.
-Then you change one line to select a different gauge and rerun it.
+The code below was written for Sewells Point, Virginia; this copy runs it on Seattle, Washington.
+Changing the `station` line is all it takes to select a gauge.
 A different gauge may need different detrending and prior choices.
 
 ## Objectives
@@ -77,14 +77,14 @@ colors = Makie.wong_colors()
 ### The data
 
 `load_water_level` downloads every hourly reading a NOAA tide gauge has published and caches it beside this notebook.
-Sewells Point sits in Norfolk, Virginia, at the mouth of Chesapeake Bay, and has reported since 1928.
+The Seattle gauge (station 9447130) sits on Elliott Bay in Puget Sound, and the record used here starts in 1928.
 
 ```{julia}
 #| solution: false
-station = "8638610"                                                    # <1>
+station = "9447130"                                                    # <1>
 record = load_water_level(
     station;
-    name="Sewells Point",
+    name="Seattle",
     cache=joinpath(@__DIR__, "$station-hourly.csv"),                   # <2>
 )
 ```
@@ -120,7 +120,7 @@ annmax = AnnMaxRecord(record; detrend=:msl, units=u"ft")               # <1>
    Try each one.
 
 An observed water level is the sum of mean sea level, the astronomical tide, storm surge, and vertical land motion.
-Sewells Point has both eustatic sea-level rise and subsidence, so its mean sea level rises about 4.6 mm/yr.
+Seattle's annual mean sea level has risen about 2.3 mm/yr over this record (a least-squares line through the annual means), about half the 4.6 mm/yr at Sewells Point.
 A stationary GEV requires that every year be drawn from the same distribution, so the trend must be removed first.
 Subtracting annual mean sea level removes the sea-level component but leaves the tide in the residual.
 A design study would remove the tide as well.
@@ -128,7 +128,7 @@ A design study would remove the tide as well.
 ```{julia}
 #| solution: false
 #| label: fig-detrend
-#| fig-cap: "Annual maxima at Sewells Point before and after removing mean sea level. The baseline is what was subtracted."
+#| fig-cap: "Annual maxima at Seattle before and after removing mean sea level. The baseline is what was subtracted."
 y = ustrip.(waterlevels(annmax))                                       # <1>
 raw = y .+ annmax.baseline .- mean(annmax.baseline[(end-4):end])     # <2>
 
@@ -201,7 +201,7 @@ function negative_loglik(θ, y)
     return -sum(my_gev_logpdf(yᵢ, μ, exp(log_σ), ξ) for yᵢ in y)       # <1>
 end
 
-θ₀ = [mean(y), log(std(y)), 0.1]                                       # <2>
+θ₀ = [mean(y), log(std(y)), 0.0]                                       # <2>
 result = optimize(θ -> negative_loglik(θ, y), θ₀, NelderMead())
 μ̂, log_σ̂, ξ̂ = Optim.minimizer(result)
 
@@ -211,8 +211,9 @@ result = optimize(θ -> negative_loglik(θ, y), θ₀, NelderMead())
 ```
 
 1. Summing the log-densities and negating, since `optimize` minimizes.
-1. The starting guess: sample moments for location and scale, and a small positive shape.
+1. The starting guess: sample moments for location and scale, and zero shape (the Gumbel).
    A bad starting guess is the usual reason this fails.
+   At Seattle a starting shape of 0.1 failed on the first step: a positive shape gives the GEV a lower bound, and the optimizer's first trial point raised that bound above the lowest observed year, so the likelihood was zero there. A zero shape has no bound.
 1. Check convergence before using the result.
 
 ::: {.callout-important}
@@ -262,8 +263,8 @@ fig
 
 #### Bootstrap confidence bands
 
-Each of those curves is one estimate from 96 years of data.
-A different 96 years from the same process would give different parameters and a different curve.
+Each of those curves is one estimate from 98 years of data.
+A different 98 years from the same process would give different parameters and a different curve.
 The bootstrap estimates that spread: resample the record with replacement, refit, and repeat.
 
 Bootstrap the L-moment fit rather than the maximum likelihood fit.
@@ -393,13 +394,13 @@ Choose a few return periods, state what you believe about the level at each, and
 #| solution: false
 #| output: false
 quantile_beliefs = [                                                   # <1>
-    (period=2, belief=Normal(5.0, 1.0)),
-    (period=100, belief=Normal(8.0, 2.5)),
-    (period=500, belief=Normal(9.5, 4.0)),
+    (period=2, belief=Normal(7.2, 0.5)),
+    (period=100, belief=Normal(8.5, 1.0)),
+    (period=500, belief=Normal(9.0, 1.5)),
 ]
 
 @model function gev_quantile(y, beliefs)
-    μ ~ Normal(5, 3)
+    μ ~ Normal(7, 3)
     σ ~ truncated(Normal(0, 2); lower=0.01)
     ξ ~ truncated(Normal(0, 0.2); lower=-0.5, upper=0.5)               # <2>
     d = GeneralizedExtremeValue(μ, σ, ξ)
@@ -412,9 +413,9 @@ quantile_beliefs = [                                                   # <1>
 end
 ```
 
-1. Each entry is a belief about one return level: the 2-year level is 5 ft with standard deviation 1 ft, the 100-year level is 8 ft with standard deviation 2.5 ft, and the 500-year level is 9.5 ft with standard deviation 4 ft.
-   **These numbers are for Sewells Point.**
-   A gauge with a different tidal range needs different ones.
+1. Each entry is a belief about one return level: the 2-year level is 7.2 ft with standard deviation 0.5 ft, the 100-year level is 8.5 ft with standard deviation 1 ft, and the 500-year level is 9 ft with standard deviation 1.5 ft.
+   **These numbers are for Seattle.**
+   The Sewells Point values (5, 8 and 9.5 ft) put Seattle's typical year, about 7.2 ft above mean sea level, more than two standard deviations out.
 1. Bounding the shape rules out the distributions with no finite variance.
    This is a strong assumption; revisit it if the posterior for $\xi$ concentrates near a bound.
 1. Each belief contributes its log-density evaluated at the return level the current parameters imply, so parameter sets implying return levels you called implausible receive lower posterior density.
@@ -424,7 +425,7 @@ end
 #| label: fig-prior-quantile
 #| fig-cap: "Return-level curves implied by the quantile prior. Compare the vertical scale to the previous figure."
 quantile_prior_df = DataFrame(
-    sample(rng, gev_quantile(y, quantile_beliefs), Prior(), 1_000; progress=false)
+    sample(rng, gev_quantile(Float64[], quantile_beliefs), NUTS(0.99), 1_000; progress=false)  # <1>
 )
 quantile_curves = return_curves(quantile_prior_df, return_periods)
 
@@ -437,6 +438,22 @@ hlines!(ax, [maximum(y)]; color=:black, linestyle=:dash, label="largest observed
 return_period_axis!(ax)
 axislegend(ax; position=:lt)
 fig
+```
+
+1. Sampling the model with an empty data vector, so only the priors and the beliefs contribute.
+   `Prior()` would not work here: it draws only from the `~` lines and skips every `@addlogprob!` term, so it ignores the beliefs entirely.
+   On Seattle, `Prior()` gave a median 500-year level of about 15 ft against the 9 ft the beliefs state.
+
+```{julia}
+#| solution: false
+for T in (2, 100, 500)
+    levels = [
+        quantile(GeneralizedExtremeValue(r.μ, r.σ, r.ξ), 1 - 1 / T)
+        for r in eachrow(quantile_prior_df)
+    ]
+    @printf("%3d-yr level implied by the quantile prior: median %.2f [%.2f, %.2f] ft\n",
+        T, median(levels), quantile(levels, 0.025), quantile(levels, 0.975))
+end
 ```
 
 The implied return levels are now physically plausible, and they still span a wide range.
@@ -508,7 +525,7 @@ for (chain, colour, label) in
 end
 scatter!(ax, observed_periods, sorted_obs; color=:black, markersize=6, label="observed")
 return_period_axis!(ax)
-axislegend(ax; position=:lt, framevisible=true)
+axislegend(ax; position=:rb, framevisible=true)
 fig
 ```
 
@@ -562,7 +579,26 @@ Look at your gauge's record before choosing new numbers, and say what you change
 
 **Your answer.**
 
-> *Answer here*
+> I switched to Seattle (station 9447130), which gives 98 annual maxima from 1928 to 2025.
+> After removing each year's mean sea level they run from 6.35 to 8.50 ft, with a median of 7.18 ft.
+> Mean sea level rose about 2.3 mm/yr over the record, half the Sewells Point rate.
+> Going through the notebook in order:
+>
+> - **Data and detrending:** loaded and detrended without problems. Trustworthy.
+> - **`gevfit` vs L-moments:** they agree closely (μ 7.069 vs 7.068 ft, σ 0.356 vs 0.357 ft, ξ −0.138 vs −0.140). Trustworthy.
+> - **Hand-written optimizer: broke.** It printed `converged: false` and returned its own starting guess (ξ = 0.100). Its negative log-likelihood (65.27) was the same as at the start, against 45.35 at the true optimum. With a starting ξ of +0.1 the GEV has a lower limit, μ − σ/ξ. Nelder-Mead's first trial point moved μ up to 10.87 ft, which raised that limit to 6.93 ft, above Seattle's lowest year of 6.35 ft. The likelihood was zero there, so the optimizer stopped after 0 iterations. I changed the starting ξ to 0 (the Gumbel, which has no limit). It then converges and matches `gevfit` to three decimals.
+> - **Bootstrap:** ran without problems. Trustworthy.
+> - **Vague prior: broke, and I left it as is.** Worst R̂ = 3.72, smallest ESS = 8, and 3830 of 4000 draws diverged. The chains are stuck near ξ ≈ −1.07, σ ≈ 6 ft, μ ≈ 3 ft. Below ξ = −1 the GEV density goes to infinity at its upper limit, and the sampler chases that spike instead of fitting the data. Raising the target acceptance would not fix this, because the prior itself allows those values. Nothing from this chain is usable.
+> - **Quantile prior:** with the Sewells Point numbers it happened to converge (R̂ 1.003, 1 divergence). But its beliefs put the 2-year level at 5 ± 1 ft, while Seattle's typical year is about 7.2 ft, more than two standard deviations away. I changed the beliefs to:
+>   - 2-year: Normal(7.2, 0.5), because the median annual maximum is 7.18 ft.
+>   - 100-year: Normal(8.5, 1.0), because the largest value in 98 years is 8.50 ft, which is roughly what a 100-year level means.
+>   - 500-year: Normal(9.0, 1.5), a little higher and wider because it is an extrapolation.
+>
+>   I also moved the prior on μ from Normal(5, 3) to Normal(7, 3).
+>   I made the standard deviations much smaller than at Sewells Point because Seattle's year-to-year spread is small (σ ≈ 0.36 ft): its annual maximum is mostly a big tide. I kept them wider than that spread so the prior guides the fit without dictating it.
+>   One weakness: I read these beliefs off the same record I then fit, so the data count twice. The wide standard deviations are there to limit that.
+>   With the new prior, R̂ = 1.002 and there are 0 divergences.
+> - **Prior predictive check for the quantile prior: broke without any warning.** `Prior()` draws only from the `~` lines and skips the `@addlogprob!` beliefs, so the figure showed a median 500-year level of about 15 ft, not the 9 ft I asked for. I replaced it by sampling the model with no data. The prior now implies a 500-year level of 8.98 ft [7.61, 10.94].
 
 
 ### The shape parameter
@@ -573,9 +609,43 @@ Report all three.
 They should agree closely on $\mu$ and $\sigma$ and less closely on $\xi$.
 Explain why $\xi$ is the least well determined, and say which of the three you would report to a client and why.
 
+```{julia}
+#| solution: false
+for (name, get) in (("μ", d -> d.μ), ("σ", d -> d.σ), ("ξ", d -> d.ξ))  # <1>
+    draws = get.(boot_fits)
+    @printf("%s: estimate %6.3f, bootstrap sd %.3f, 95%% [%6.3f, %6.3f], sd/|estimate| = %.2f\n",
+        name, get(fit_lmom), std(draws), quantile(draws, 0.025), quantile(draws, 0.975),
+        std(draws) / abs(get(fit_lmom)))
+end
+```
+
+1. The bootstrap fits from earlier, read one parameter at a time, to show how well the record pins down each one.
+
 **Your answer.**
 
-> *Answer here*
+> | Estimator | μ (ft) | σ (ft) | ξ |
+> |---|---|---|---|
+> | Maximum likelihood (`gevfit`) | 7.069 | 0.356 | −0.138 |
+> | L-moments | 7.068 | 0.357 | −0.140 |
+> | By hand (Nelder-Mead, starting at ξ = 0) | 7.069 | 0.356 | −0.138 |
+>
+> The hand-written fit matches `gevfit` exactly because both maximize the same likelihood.
+> At Seattle the three agree on ξ as well, only 0.002 apart.
+> That agreement hides how poorly ξ is determined.
+> In the bootstrap, ξ has a standard deviation of 0.075 and a 95% range of −0.30 to −0.02, about half its own size.
+> μ varies by only about 1% of its value and σ by about 8%.
+>
+> μ and σ describe the middle and spread of the annual maxima, and all 98 years contribute to them.
+> ξ describes how the upper tail bends, and that depends on the few largest years.
+> Only two years at Seattle are above 8.1 ft (8.50 and 8.30 ft).
+> Whether a bootstrap sample happens to include them changes ξ a lot, and a different century of weather would have produced different extremes.
+> Ninety-eight years hold very little information about the tail.
+>
+> For a client I would report the L-moment fit with its bootstrap interval.
+> Here it gives the same 100-year level as maximum likelihood (8.28 ft), so the choice does not change the number.
+> But L-moments always return an estimate, so the bootstrap interval is reliable and does not silently drop failed fits.
+> For records of about 100 years, L-moment (probability-weighted moment) estimates have been found to do as well as or better than maximum likelihood (Hosking, Wallis and Wood, 1985).
+> The hand-optimized fit is a check that I wrote the likelihood correctly, not a separate estimate to report.
 
 
 ### Sensitivity to the prior
@@ -587,7 +657,29 @@ Using your prior predictive figures and your posterior intervals, say whether th
 
 **Your answer.**
 
-> *Answer here*
+> | | 500-year level (ft) | 95% interval (ft) | Width |
+> |---|---|---|---|
+> | Vague prior | 8.51 | [8.49, 8.60] | 0.11 ft |
+> | Quantile prior | 8.66 | [8.34, 9.37] | 1.03 ft |
+> | Bootstrap, for comparison | 8.55 | [8.06, 9.14] | 1.08 ft |
+>
+> The description does not hold at Seattle.
+> The vague prior is not neutral.
+> Its prior predictive figure puts the median 500-year level at 173 ft.
+> Of the 200 curves plotted, about a fifth have a negative 500-year level and about three quarters exceed 50 ft.
+> It spreads its belief over values no tide gauge has ever recorded, and it allows shape values below −1, where the likelihood has no maximum.
+> The data cannot overcome that.
+> The chains never converged (R̂ = 3.72, 3830 divergences), and they got stuck where ξ ≈ −1.07.
+> There the fitted distribution's upper limit sits at about 8.5 ft, the largest value in the record.
+> So its very narrow 500-year interval says, in effect, "the worst water level possible is the worst we have seen."
+> That comes from a stuck sampler, not from the data, and a city could be badly misled by it.
+>
+> The quantile prior is where the data actually do the talking.
+> Before seeing any data, it implied a 500-year level of 8.98 ft [7.61, 10.94], a range of 3.3 ft.
+> After the data, the posterior was 8.66 ft [8.34, 9.37]: the median moved down, and the range shrank to about a third of the prior's.
+> The posterior also sits close to the bootstrap estimate, which uses no prior at all.
+> So the prior that states real beliefs about water levels was the one that let the data dominate.
+> The one meant to be "uninformative" either overwhelmed the data or broke the sampler.
 
 
 ### Reading a failed diagnostic
@@ -599,7 +691,29 @@ Say what the two numbers mean, whether the estimate can be used, and what you wo
 
 **Your answer.**
 
-> *Answer here*
+> Hi, thanks for sending this. Unfortunately I don't think the 100-year level is usable yet, not even as a rough number.
+>
+> **R̂ = 1.08 on ξ** means your four chains disagree about the shape parameter.
+> R̂ compares the spread between chains with the spread within each chain.
+> If the chains had all explored the same distribution it would be about 1.00, and the usual cutoff is 1.01.
+> At 1.08 the chains are still exploring different ranges of ξ.
+>
+> **47 divergences** means the sampler failed numerically 47 times and did not properly explore those regions.
+> With the GEV this usually happens along the edge where the data fall outside the fitted distribution's range, and that edge moves as ξ changes.
+> Divergences make the draws biased, not just noisy, so running more draws does not fix them.
+>
+> Both problems are in ξ, and ξ is the parameter that controls the 100-year level most.
+> So both the median and the interval could be wrong, and we can't tell by how much.
+>
+> Could you try these steps?
+>
+> 1. Compare the posterior with `gevfit` and `gevfit_lmom` on the same data. If they disagree a lot, the chain is the problem.
+> 2. Check which prior you used. If it's the vague one, look at its prior predictive figure. On my gauge (Seattle) the vague prior gave R̂ = 3.7 and 3830 divergences, and a quantile prior with beliefs for your own gauge fixed both.
+> 3. Plot the chains for ξ to see whether one chain is stuck somewhere different from the others.
+> 4. Check the data: units, missing or partial years, the detrending choice, and any suspicious outliers.
+> 5. If it still struggles, run a longer warm-up, or tighten the bounds on ξ if the posterior is piling up against one.
+>
+> Please rerun until R̂ is below 1.01 and the divergences are at or near zero, and then report the 100-year level with its interval.
 
 
 ### Reporting a design value
@@ -608,9 +722,42 @@ Report one 100-year return level for your gauge, with one interval, as you would
 
 State the number and say what it rests on: which estimator, which detrending choice, which prior, and what you would want before trusting it further.
 
+```{julia}
+#| solution: false
+for detrend in (:none, :linear, :msl)                                  # <1>
+    yd = ustrip.(waterlevels(AnnMaxRecord(record; detrend=detrend, units=u"ft")))
+    d = gevfit_lmom(yd)
+    @printf("detrend = %-8s ξ = %6.3f, 100-yr %.2f ft\n", detrend, d.ξ, quantile(d, 1 - 1 / 100))
+end
+
+post = DataFrame(chain_quantile)
+bound = [r.ξ < 0 ? r.μ - r.σ / r.ξ : Inf for r in eachrow(post)]      # <2>
+@printf("posterior share with ξ < 0: %.2f; implied upper limit median %.2f ft, 2.5%% %.2f ft\n",
+    mean(post.ξ .< 0), median(bound), quantile(bound, 0.025))
+```
+
+1. The same L-moment fit under each detrending choice, to see how much the design value depends on it.
+2. A negative shape gives the GEV a finite upper limit, $\mu - \sigma/\xi$, which no water level can exceed.
+
 **Your answer.**
 
-> *Answer here*
+> **100-year water level at Seattle: 8.35 ft above that year's mean sea level, 95% credible interval 8.13 to 8.77 ft.**
+>
+> What this number rests on:
+>
+> - **Estimator:** the Bayesian GEV posterior under the quantile prior. Its chains converged (R̂ = 1.002, 0 divergences, effective sample size about 2,200), and its interval carries the uncertainty in all three parameters at once. It agrees with the maximum likelihood and L-moment fits (8.28 ft) and with the bootstrap interval of 7.93 to 8.63 ft. It is a little wider on the high side, which is the safer side for design.
+> - **Detrending:** each year's mean sea level is subtracted. The number is therefore a height above mean sea level, not an elevation. To get a design elevation, the city has to add the mean sea level expected over the structure's life and convert to its own vertical reference. Over this record Seattle's mean sea level rose about 2.3 mm/yr (about 0.75 ft per century), and future rise is expected to be faster. The choice matters less than that addition: subtracting a straight-line trend instead gives 8.31 ft. Leaving the trend in gives 8.05 ft, which mixes old, lower sea levels into the fit and is biased low for today.
+> - **Prior:** my Seattle quantile beliefs (2-year 7.2 ± 0.5 ft, 100-year 8.5 ± 1 ft, 500-year 9 ± 1.5 ft). They were read off the same record, so the interval may be somewhat too narrow.
+> - **Model:** a single GEV that stays the same over time, fit to 98 annual maxima, with the tide left in. In 97% of the posterior draws ξ is negative, which gives the fitted distribution a hard upper limit (median 10.15 ft, and as low as 8.82 ft in the lowest 2.5% of draws). That limit is a feature of the curve, not a physical guarantee, and the city should not treat it as one.
+>
+> Before trusting it further, I would want:
+>
+> 1. Sea-level rise projections added for the design year.
+> 2. The tide and storm surge analyzed separately, so we know how much of an extreme comes from a very high tide and how much from a storm.
+> 3. A comparison with NOAA's published extreme water levels for Seattle and with nearby gauges.
+> 4. A model whose parameters can change over time, to test whether the extremes themselves are changing.
+> 5. A check for missing or partial years in the record.
+> 6. A check that the answer holds up under reasonable changes to the prior.
 
 
 ## Turning it in
